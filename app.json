@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Buddy-app",
+    "slug": "Buddy-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/logo.png",
+    "scheme": "buddyapp",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/images/logo.png",
+      "bundleIdentifier": "com.opxai.buddy.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/logo.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.opxai.buddy.app"
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "android": {
+            "image": "./assets/images/logo.png",
+            "imageWidth": 76
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "642bf780-fec8-4305-b105-69c1b91e0560"
+      },
+      "apiUrl": "https://xv2pbkqkl5.execute-api.us-east-2.amazonaws.com/dev/chat"
+    }
+  }
+}
