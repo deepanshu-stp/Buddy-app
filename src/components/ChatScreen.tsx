@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Mic, RefreshCw, Send } from "lucide-react-native";
 import punycode from "punycode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -16,8 +17,6 @@ import {
 import Markdown from "react-native-markdown-display";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL, fetchWithTimeout } from "../../api";
-import { Send,RefreshCw, Mic } from 'lucide-react-native';
-import { Image } from "react-native";
 
 interface Message {
   id: string;
@@ -180,27 +179,27 @@ export default function ChatScreen() {
 
   /* ------------------ Load history & model ------------------ */
   useEffect(() => {
-  const loadChatHistory = async () => {
-    const saved = await AsyncStorage.getItem("chatHistory");
+    const loadChatHistory = async () => {
+      const saved = await AsyncStorage.getItem("chatHistory");
 
-    if (!saved) return; // 👈 IMPORTANT
+      if (!saved) return; // 👈 IMPORTANT
 
-    const parsed = JSON.parse(saved);
+      const parsed = JSON.parse(saved);
 
-    if (!parsed.length) return; // 👈 prevent empty reload
+      if (!parsed.length) return; // 👈 prevent empty reload
 
-    setChatHistory(parsed);
-    setMessages(
-      parsed.map((m: { content: any; role: string; }, i: any) => ({
-        id: String(i),
-        text: m.content,
-        sender: m.role === "user" ? "user" : "bot",
-      }))
-    );
-  };
+      setChatHistory(parsed);
+      setMessages(
+        parsed.map((m: { content: any; role: string }, i: any) => ({
+          id: String(i),
+          text: m.content,
+          sender: m.role === "user" ? "user" : "bot",
+        })),
+      );
+    };
 
-  loadChatHistory();
-}, []);
+    loadChatHistory();
+  }, []);
 
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -247,12 +246,12 @@ export default function ChatScreen() {
 
   /* ------------------ Save chat history ------------------ */
   useEffect(() => {
-  if (chatHistory.length === 0) {
-    AsyncStorage.removeItem("chatHistory");
-  } else {
-    AsyncStorage.setItem("chatHistory", JSON.stringify(chatHistory));
-  }
-}, [chatHistory]);
+    if (chatHistory.length === 0) {
+      AsyncStorage.removeItem("chatHistory");
+    } else {
+      AsyncStorage.setItem("chatHistory", JSON.stringify(chatHistory));
+    }
+  }, [chatHistory]);
 
   /* ------------------ Actions ------------------ */
 
@@ -372,21 +371,21 @@ export default function ChatScreen() {
   };
 
   const handleClearChat = useCallback(async () => {
-  try {
-    console.log("Clearing chat...");
+    try {
+      console.log("Clearing chat...");
 
-    // 1. Clear storage FIRST
-    await AsyncStorage.removeItem("chatHistory");
+      // 1. Clear storage FIRST
+      await AsyncStorage.removeItem("chatHistory");
 
-    // 2. Then clear state
-    setMessages([]);
-    setChatHistory([]);
+      // 2. Then clear state
+      setMessages([]);
+      setChatHistory([]);
 
-    console.log("Chat cleared");
-  } catch (error) {
-    console.error("Clear error:", error);
-  }
-}, []);
+      console.log("Chat cleared");
+    } catch (error) {
+      console.error("Clear error:", error);
+    }
+  }, []);
 
   const handleMicPress = async () => {
     if (isLoading) return;
@@ -447,8 +446,11 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}>
-        
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+      >
         {/* ---------- Header ---------- */}
         <View style={styles.header}>
           <Text style={styles.logo}>Buddy</Text>
@@ -525,28 +527,40 @@ export default function ChatScreen() {
                 style={styles.textInput}
               />
 
-              <TouchableOpacity onPress={handleMicPress}>
-                <Text><Mic size={22} /></Text>
+              <TouchableOpacity
+                onPress={handleMicPress}
+                style={[
+                  styles.micButton,
+                  isListening && styles.micButtonActive,
+                  { transform: [{ scale: isListening ? 1.1 : 1 }] },
+                ]}
+              >
+                <Mic size={20} color={isListening ? "#fff" : "#334155"} />
               </TouchableOpacity>
 
               <TouchableOpacity onPress={handleSendMessage}>
-                <Text style={styles.send}><Send size={16} strokeWidth={2.5} /></Text>
+                <Text style={styles.send}>
+                  <Send size={16} color="white" strokeWidth={2.5} />
+                </Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.clearButton} onPress={handleClearChat}>
-              <Text><RefreshCw size={18} color="#334155" strokeWidth={3} /></Text>
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={handleClearChat}
+            >
+              <Text>
+                <RefreshCw size={18} color="#334155" strokeWidth={3} />
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
-
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-
   container: {
     flex: 1,
     backgroundColor: "#f8fafc",
@@ -565,7 +579,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "800",
     color: "#0f172a",
-  },    
+  },
   poweredPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -615,11 +629,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 24,
     paddingVertical: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    boxShadow: "0px 1px 2px rgba(0, 0, 0, 0.05)",
   },
   messageBubbleUser: {
     backgroundColor: "#e2e8f0",
@@ -644,11 +654,7 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    boxShadow: "0px 2px 4px rgba(0, 0, 0, 0.2)",
   },
   scrollToBottomBtnText: {
     color: "#ffffff",
@@ -657,12 +663,12 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   composerContainer: {
-    backgroundColor: "#f8fafc",
+    // backgroundColor: "#f8fafc",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 24,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
+    // borderTopWidth: 1,
+    // borderTopColor: "#e2e8f0",
   },
   composerWrapper: {
     flexDirection: "row",
@@ -677,11 +683,7 @@ const styles = StyleSheet.create({
     borderRadius: 80,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    boxShadow: "0px 2px 4px rgba(0, 0, 0, 0.1)",
     borderWidth: 1,
     borderColor: "#e2e8f0",
     gap: 8,
@@ -693,10 +695,20 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     maxHeight: 144,
   },
+  micButton: {
+    padding: 10,
+    borderRadius: 50,
+    backgroundColor: "#e2e8f0",
+  },
+
+  micButtonActive: {
+    backgroundColor: "#ef4444", // 🔴 red when listening
+  },
+
   send: {
     backgroundColor: "#3b82f6",
     color: "#fff",
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 10,
     paddingLeft: 10,
     paddingRight: 12,
@@ -708,5 +720,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
-
 });
