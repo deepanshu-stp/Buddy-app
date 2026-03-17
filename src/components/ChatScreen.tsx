@@ -1,9 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import punycode from "punycode";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
+  NativeModules,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,8 @@ import {
 import Markdown from "react-native-markdown-display";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL, fetchWithTimeout } from "../../api";
+import { Send,RefreshCw, Mic } from 'lucide-react-native';
+import { Image } from "react-native";
 
 interface Message {
   id: string;
@@ -31,6 +34,29 @@ interface ChatResponse {
   model?: string;
   [key: string]: unknown; // Allow additional fields for flexibility
 }
+
+interface VoiceModule {
+  onSpeechPartialResults?: (event: { value?: string[] }) => void;
+  onSpeechResults?: (event: { value?: string[] }) => void;
+  onSpeechEnd?: () => void;
+  onSpeechError?: (event: { error?: { message?: string } }) => void;
+  start: (locale: string) => Promise<void>;
+  stop: () => Promise<void>;
+  destroy: () => Promise<void>;
+  removeAllListeners: () => void;
+}
+
+const isVoiceModule = (value: unknown): value is VoiceModule => {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<VoiceModule>;
+  return (
+    typeof candidate.start === "function" &&
+    typeof candidate.stop === "function" &&
+    typeof candidate.destroy === "function" &&
+    typeof candidate.removeAllListeners === "function"
+  );
+};
 
 const normalizeApiUrl = (url: string) => {
   try {
@@ -105,40 +131,76 @@ export default function ChatScreen() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   // const [currentProvider, setCurrentProvider] = useState("");
   // const [currentModel, setCurrentModel] = useState("");
 
   const scrollViewRef = useRef<ScrollView>(null);
+  const speechBaseTextRef = useRef("");
+  const voiceRef = useRef<VoiceModule | null>(null);
+  const hasLoggedVoiceUnavailableRef = useRef(false);
+
+  const getVoice = (): VoiceModule | null => {
+    if (voiceRef.current) return voiceRef.current;
+
+    if (Platform.OS === "web" || !NativeModules.Voice) {
+      if (!hasLoggedVoiceUnavailableRef.current) {
+        console.warn("Voice native module is not linked in this build.");
+        hasLoggedVoiceUnavailableRef.current = true;
+      }
+      return null;
+    }
+
+    try {
+      const voicePackage = require("@react-native-voice/voice") as
+        | VoiceModule
+        | { default?: VoiceModule }
+        | undefined;
+      const maybeVoice =
+        voicePackage &&
+        typeof voicePackage === "object" &&
+        "default" in voicePackage
+          ? voicePackage.default
+          : voicePackage;
+
+      if (!isVoiceModule(maybeVoice)) {
+        return null;
+      }
+
+      voiceRef.current = maybeVoice;
+      return maybeVoice;
+    } catch (error) {
+      if (!hasLoggedVoiceUnavailableRef.current) {
+        console.warn("Voice module is unavailable in this build.", error);
+        hasLoggedVoiceUnavailableRef.current = true;
+      }
+      return null;
+    }
+  };
 
   /* ------------------ Load history & model ------------------ */
   useEffect(() => {
-    const loadChatHistory = async () => {
-      try {
-        const saved = await AsyncStorage.getItem("chatHistory");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          setChatHistory(parsed);
-          setMessages(
-            parsed.map(
-              (
-                m: { role: "user" | "assistant"; content: string },
-                i: number,
-              ) => ({
-                id: `loaded-${i}`,
-                text: m.content,
-                sender: m.role === "user" ? "user" : "bot",
-                timestamp: new Date(),
-              }),
-            ),
-          );
-        }
-      } catch (error) {
-        console.error("Error loading chat history:", error);
-      }
-    };
+  const loadChatHistory = async () => {
+    const saved = await AsyncStorage.getItem("chatHistory");
 
-    loadChatHistory();
-  }, []);
+    if (!saved) return; // 👈 IMPORTANT
+
+    const parsed = JSON.parse(saved);
+
+    if (!parsed.length) return; // 👈 prevent empty reload
+
+    setChatHistory(parsed);
+    setMessages(
+      parsed.map((m: { content: any; role: string; }, i: any) => ({
+        id: String(i),
+        text: m.content,
+        sender: m.role === "user" ? "user" : "bot",
+      }))
+    );
+  };
+
+  loadChatHistory();
+}, []);
 
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -148,20 +210,71 @@ export default function ChatScreen() {
     console.log("[API] base URL:", SAFE_API_URL);
   }, []);
 
+  useEffect(() => {
+    const voice = getVoice();
+    if (!voice) return;
+
+    voice.onSpeechPartialResults = (event: { value?: string[] }) => {
+      const transcript = event.value?.[0]?.trim();
+      if (!transcript) return;
+      setInputValue(`${speechBaseTextRef.current}${transcript}`.trim());
+    };
+
+    voice.onSpeechResults = (event: { value?: string[] }) => {
+      const transcript = event.value?.[0]?.trim();
+      if (!transcript) return;
+      setInputValue(`${speechBaseTextRef.current}${transcript}`.trim());
+    };
+
+    voice.onSpeechEnd = () => {
+      setIsListening(false);
+      speechBaseTextRef.current = "";
+    };
+
+    voice.onSpeechError = (event: { error?: { message?: string } }) => {
+      console.error("Speech recognition error:", event.error);
+      setIsListening(false);
+      speechBaseTextRef.current = "";
+    };
+
+    return () => {
+      voice.destroy().catch((err) => {
+        console.error("Failed to destroy voice instance:", err);
+      });
+      voice.removeAllListeners();
+    };
+  }, []);
+
   /* ------------------ Save chat history ------------------ */
   useEffect(() => {
-    if (chatHistory.length > 0) {
-      AsyncStorage.setItem("chatHistory", JSON.stringify(chatHistory));
-    } else {
-      // Explicitly remove when empty to ensure it's cleared
-      AsyncStorage.removeItem("chatHistory");
-    }
-  }, [chatHistory]);
+  if (chatHistory.length === 0) {
+    AsyncStorage.removeItem("chatHistory");
+  } else {
+    AsyncStorage.setItem("chatHistory", JSON.stringify(chatHistory));
+  }
+}, [chatHistory]);
 
   /* ------------------ Actions ------------------ */
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
+
+    if (isListening) {
+      const voice = getVoice();
+      if (!voice) {
+        setIsListening(false);
+        speechBaseTextRef.current = "";
+        return;
+      }
+
+      try {
+        await voice.stop();
+      } catch (error) {
+        console.error("Failed to stop voice recognition before send:", error);
+      }
+      setIsListening(false);
+      speechBaseTextRef.current = "";
+    }
 
     const text = inputValue;
     setInputValue("");
@@ -258,32 +371,61 @@ export default function ChatScreen() {
     }
   };
 
-  const handleClearChat = async () => {
-    console.log("Clear chat button pressed");
-    Alert.alert(
-      "Clear Chat",
-      "Are you sure you want to clear the chat history?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              // Clear state first
-              setMessages([]);
-              setChatHistory([]);
-              // Then remove from storage
-              await AsyncStorage.removeItem("chatHistory");
-              console.log("Chat history cleared successfully");
-            } catch (error) {
-              console.error("Error clearing chat:", error);
-            }
-          },
-        },
-      ],
-      { cancelable: true },
-    );
+  const handleClearChat = useCallback(async () => {
+  try {
+    console.log("Clearing chat...");
+
+    // 1. Clear storage FIRST
+    await AsyncStorage.removeItem("chatHistory");
+
+    // 2. Then clear state
+    setMessages([]);
+    setChatHistory([]);
+
+    console.log("Chat cleared");
+  } catch (error) {
+    console.error("Clear error:", error);
+  }
+}, []);
+
+  const handleMicPress = async () => {
+    if (isLoading) return;
+
+    const voice = getVoice();
+    if (!voice) {
+      Alert.alert(
+        "Voice Input Unavailable",
+        "Speech recognition is not available in this build. Run a native dev build (expo run:ios / expo run:android) and try again.",
+      );
+      return;
+    }
+
+    if (isListening) {
+      try {
+        await voice.stop();
+      } catch (error) {
+        console.error("Failed to stop voice recognition:", error);
+      }
+      setIsListening(false);
+      speechBaseTextRef.current = "";
+      return;
+    }
+
+    try {
+      speechBaseTextRef.current = inputValue.trim()
+        ? `${inputValue.trim()} `
+        : "";
+      await voice.start("en-US");
+      setIsListening(true);
+    } catch (error) {
+      console.error("Failed to start voice recognition:", error);
+      Alert.alert(
+        "Voice Input Unavailable",
+        "Could not start speech recognition. Please check microphone and speech recognition permissions.",
+      );
+      setIsListening(false);
+      speechBaseTextRef.current = "";
+    }
   };
 
   const hasMessages = messages.length > 0;
@@ -305,15 +447,11 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* ---------- Header ---------- */}
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
-      >
+     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}>
+        
+        {/* ---------- Header ---------- */}
         <View style={styles.header}>
           <Text style={styles.logo}>Buddy</Text>
-
           <View style={styles.poweredPill}>
             <Text style={styles.poweredText}>Powered by</Text>
             <Text style={styles.opx}>OPX</Text>
@@ -382,56 +520,40 @@ export default function ChatScreen() {
               <TextInput
                 value={inputValue}
                 onChangeText={setInputValue}
-                placeholder="Message Buddy…"
+                placeholder="Message Buddy..."
                 placeholderTextColor="#94a3b8"
-                editable={!isLoading}
-                multiline
                 style={styles.textInput}
-                onSubmitEditing={handleSendMessage}
-                blurOnSubmit={false}
-                returnKeyType="send"
               />
 
-              <TouchableOpacity
-                onPress={handleSendMessage}
-                disabled={isLoading || !inputValue.trim()}
-                style={[
-                  styles.sendButton,
-                  (isLoading || !inputValue.trim()) &&
-                    styles.sendButtonDisabled,
-                ]}
-              >
-                <Text style={styles.sendButtonText}>
-                  {inputValue.trim() ? "➤" : "Send"}
-                </Text>
+              <TouchableOpacity onPress={handleMicPress}>
+                <Text><Mic size={22} /></Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={handleSendMessage}>
+                <Text style={styles.send}><Send size={16} strokeWidth={2.5} /></Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              onPress={handleClearChat}
-              style={styles.clearButton}
-            >
-              <Text style={styles.clearButtonText}>🔄</Text>
+            <TouchableOpacity style={styles.clearButton} onPress={handleClearChat}>
+              <Text><RefreshCw size={18} color="#334155" strokeWidth={3} /></Text>
             </TouchableOpacity>
           </View>
         </View>
+
       </KeyboardAvoidingView>
     </SafeAreaView>
-
-    /* </KeyboardAvoidingView> */
   );
 }
 
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     backgroundColor: "#f8fafc",
   },
-
   header: {
     flexDirection: "row",
     gap: 10,
-    // justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 20,
@@ -443,7 +565,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "800",
     color: "#0f172a",
-  },
+  },    
   poweredPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -468,7 +590,6 @@ const styles = StyleSheet.create({
     color: "#22c55e",
     marginLeft: 2,
   },
-
   messagesContainer: {
     flex: 1,
     backgroundColor: "#f8fafc",
@@ -513,66 +634,6 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     lineHeight: 20,
   },
-  composerContainer: {
-    backgroundColor: "#f8fafc",
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
-  },
-  composerWrapper: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
-  },
-  inputContainer: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    gap: 12,
-  },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 24,
-    color: "#0f172a",
-    maxHeight: 144,
-  },
-  sendButton: {
-    backgroundColor: "#3b82f6",
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  sendButtonDisabled: {
-    backgroundColor: "#cbd5e1",
-  },
-  sendButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#ffffff",
-  },
-  clearButton: {
-    backgroundColor: "#e2e8f0",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 16,
-    marginBottom: 12,
-  },
-  clearButtonText: {
-    fontSize: 14,
-  },
   scrollToBottomBtn: {
     position: "absolute",
     bottom: 16,
@@ -595,4 +656,57 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 24,
   },
+  composerContainer: {
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: "#e2e8f0",
+  },
+  composerWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  inputContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 80,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 24,
+    color: "#0f172a",
+    maxHeight: 144,
+  },
+  send: {
+    backgroundColor: "#3b82f6",
+    color: "#fff",
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingLeft: 10,
+    paddingRight: 12,
+    borderRadius: 80,
+  },
+  clearButton: {
+    backgroundColor: "#e2e8f0",
+    borderRadius: 80,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+
 });

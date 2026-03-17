@@ -11,6 +11,8 @@
       "icon": "./assets/images/logo.png",
       "bundleIdentifier": "com.opxai.buddy.app",
       "infoPlist": {
+        "NSMicrophoneUsageDescription": "Buddy uses your microphone to transcribe speech into messages.",
+        "NSSpeechRecognitionUsageDescription": "Buddy uses speech recognition to convert your voice into text.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -22,6 +24,9 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/logo.png"
       },
+      "permissions": [
+        "RECORD_AUDIO"
+      ],
       "predictiveBackGestureEnabled": false,
       "package": "com.opxai.buddy.app"
     },
