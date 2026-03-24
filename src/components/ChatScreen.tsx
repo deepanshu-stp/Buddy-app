@@ -14,7 +14,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Markdown from "react-native-markdown-display";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL, fetchWithTimeout } from "../../api";
 
@@ -69,58 +68,6 @@ const normalizeApiUrl = (url: string) => {
 
 const SAFE_API_URL = normalizeApiUrl(API_URL);
 const REQUEST_TIMEOUT_MS = 30000;
-
-/* ---------- Safe, readable bot content ---------- */
-const renderMessageContent = (text: string) => {
-  return (
-    <Markdown
-      style={{
-        body: { color: "#1e293b" },
-        heading1: {
-          fontSize: 16,
-          fontWeight: "600",
-          color: "#0f172a",
-          marginBottom: 8,
-        },
-        heading2: {
-          fontSize: 12,
-          fontWeight: "600",
-          color: "#64748b",
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          marginTop: 16,
-          marginBottom: 8,
-        },
-        strong: { fontWeight: "600", color: "#0f172a" },
-        paragraph: { marginBottom: 8, lineHeight: 20 },
-        bullet_list: { marginLeft: 16 },
-        ordered_list: { marginLeft: 16 },
-        list_item: { lineHeight: 20 },
-        code_inline: {
-          backgroundColor: "#f1f5f9",
-          paddingHorizontal: 4,
-          paddingVertical: 2,
-          fontSize: 12,
-          borderRadius: 4,
-        },
-        code_block: {
-          backgroundColor: "#f1f5f9",
-          padding: 12,
-          fontSize: 12,
-          borderRadius: 8,
-        },
-        fence: {
-          backgroundColor: "#f1f5f9",
-          padding: 12,
-          fontSize: 12,
-          borderRadius: 8,
-        },
-      }}
-    >
-      {text}
-    </Markdown>
-  );
-};
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -493,9 +440,13 @@ export default function ChatScreen() {
                   ]}
                 >
                   {m.sender === "user" ? (
-                    <Text style={styles.messageTextUser}>{m.text}</Text>
+                    <Text selectable style={styles.messageTextUser}>
+                      {m.text}
+                    </Text>
                   ) : (
-                    renderMessageContent(m.text)
+                    <Text selectable style={styles.messageTextBot}>
+                      {m.text}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -522,6 +473,8 @@ export default function ChatScreen() {
               <TextInput
                 value={inputValue}
                 onChangeText={setInputValue}
+                multiline
+                blurOnSubmit={false}
                 placeholder="Message Buddy..."
                 placeholderTextColor="#94a3b8"
                 style={styles.textInput}
@@ -644,6 +597,11 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     lineHeight: 20,
   },
+  messageTextBot: {
+    fontSize: 14,
+    color: "#1e293b",
+    lineHeight: 20,
+  },
   scrollToBottomBtn: {
     position: "absolute",
     bottom: 16,
@@ -666,7 +624,7 @@ const styles = StyleSheet.create({
     // backgroundColor: "#f8fafc",
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 24,
+    paddingBottom: 12,
     // borderTopWidth: 1,
     // borderTopColor: "#e2e8f0",
   },
@@ -680,9 +638,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderRadius: 80,
+    borderRadius: 32,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     boxShadow: "0px 2px 4px rgba(0, 0, 0, 0.1)",
     borderWidth: 1,
     borderColor: "#e2e8f0",
@@ -693,7 +651,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     color: "#0f172a",
+    minHeight: 24,
     maxHeight: 144,
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
+    textAlignVertical: "top",
+    includeFontPadding: false,
   },
   micButton: {
     padding: 10,
