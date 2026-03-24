@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Mic, RefreshCw, Send } from "lucide-react-native";
 import punycode from "punycode";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -21,17 +21,65 @@ interface Message {
   id: string;
   text: string;
   sender: "user" | "bot";
-  timestamp: Date;
 }
 
 interface ChatResponse {
   answer: string;
-  query?: string;
-  sources?: string[];
-  provider?: string;
-  model?: string;
   [key: string]: unknown; // Allow additional fields for flexibility
 }
+
+type ChatHistoryItem = { role: "user" | "assistant"; content: string };
+
+const CHAT_HISTORY_KEY = "chatHistory";
+const MAX_CHAT_HISTORY = 5;
+
+const isChatHistoryItem = (value: unknown): value is ChatHistoryItem => {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<ChatHistoryItem>;
+  const validRole = candidate.role === "user" || candidate.role === "assistant";
+  return validRole && typeof candidate.content === "string";
+};
+
+const ChatMessageItem = memo(function ChatMessageItem({
+  message,
+}: {
+  message: Message;
+}) {
+  const isUser = message.sender === "user";
+
+  return (
+    <View
+      style={[
+        styles.messageWrapper,
+        isUser ? styles.messageWrapperUser : styles.messageWrapperBot,
+      ]}
+    >
+      <View
+        style={[
+          styles.messageBubble,
+          isUser ? styles.messageBubbleUser : styles.messageBubbleBot,
+        ]}
+      >
+        <TextInput
+          value={message.text}
+          editable={false}
+          multiline
+          contextMenuHidden={false}
+          scrollEnabled={false}
+          showSoftInputOnFocus={false}
+          selectTextOnFocus
+          style={[
+            styles.messageTextSelectable,
+            isUser
+              ? styles.messageTextSelectableUser
+              : styles.messageTextSelectableBot,
+          ]}
+        />
+      </View>
+    </View>
+  );
+});
 
 interface VoiceModule {
   onSpeechPartialResults?: (event: { value?: string[] }) => void;
@@ -71,20 +119,17 @@ const REQUEST_TIMEOUT_MS = 30000;
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [chatHistory, setChatHistory] = useState<
-    Array<{ role: "user" | "assistant"; content: string }>
-  >([]);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  // const [currentProvider, setCurrentProvider] = useState("");
-  // const [currentModel, setCurrentModel] = useState("");
 
   const scrollViewRef = useRef<ScrollView>(null);
   const speechBaseTextRef = useRef("");
   const voiceRef = useRef<VoiceModule | null>(null);
   const hasLoggedVoiceUnavailableRef = useRef(false);
+  const showScrollBtnRef = useRef(false);
 
   const getVoice = (): VoiceModule | null => {
     if (voiceRef.current) return voiceRef.current;
@@ -127,22 +172,32 @@ export default function ChatScreen() {
   /* ------------------ Load history & model ------------------ */
   useEffect(() => {
     const loadChatHistory = async () => {
-      const saved = await AsyncStorage.getItem("chatHistory");
+      const saved = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
 
-      if (!saved) return; // 👈 IMPORTANT
+      if (!saved) return;
 
-      const parsed = JSON.parse(saved);
+      try {
+        const parsed: unknown = JSON.parse(saved);
+        if (!Array.isArray(parsed)) {
+          await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
+          return;
+        }
 
-      if (!parsed.length) return; // 👈 prevent empty reload
+        const validHistory = parsed.filter(isChatHistoryItem);
+        if (validHistory.length === 0) return;
 
-      setChatHistory(parsed);
-      setMessages(
-        parsed.map((m: { content: any; role: string }, i: any) => ({
-          id: String(i),
-          text: m.content,
-          sender: m.role === "user" ? "user" : "bot",
-        })),
-      );
+        setChatHistory(validHistory);
+        setMessages(
+          validHistory.map((m, i) => ({
+            id: String(i),
+            text: m.content,
+            sender: m.role === "user" ? "user" : "bot",
+          })),
+        );
+      } catch (error) {
+        console.error("Failed to parse chat history:", error);
+        await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
+      }
     };
 
     loadChatHistory();
@@ -194,16 +249,19 @@ export default function ChatScreen() {
   /* ------------------ Save chat history ------------------ */
   useEffect(() => {
     if (chatHistory.length === 0) {
-      AsyncStorage.removeItem("chatHistory");
+      AsyncStorage.removeItem(CHAT_HISTORY_KEY);
     } else {
-      AsyncStorage.setItem("chatHistory", JSON.stringify(chatHistory));
+      AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory));
     }
   }, [chatHistory]);
 
   /* ------------------ Actions ------------------ */
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+    if (isLoading) return;
+
+    const text = inputValue.trim();
+    if (!text) return;
 
     if (isListening) {
       const voice = getVoice();
@@ -222,7 +280,6 @@ export default function ChatScreen() {
       speechBaseTextRef.current = "";
     }
 
-    const text = inputValue;
     setInputValue("");
     setIsLoading(true);
 
@@ -232,12 +289,11 @@ export default function ChatScreen() {
         id: Date.now().toString(),
         text,
         sender: "user",
-        timestamp: new Date(),
       },
     ]);
 
     try {
-      const trimmed = chatHistory.slice(-5);
+      const trimmed = chatHistory.slice(-MAX_CHAT_HISTORY);
       const endpoint = SAFE_API_URL;
       console.log("[API] chat request:", endpoint);
 
@@ -275,9 +331,6 @@ export default function ChatScreen() {
 
       const chatResponse: ChatResponse = data;
 
-      // setCurrentProvider(chatResponse.provider);
-      // setCurrentModel(chatResponse.model);
-
       setChatHistory([
         ...trimmed,
         { role: "user", content: text },
@@ -290,7 +343,6 @@ export default function ChatScreen() {
           id: (Date.now() + 1).toString(),
           text: chatResponse.answer,
           sender: "bot",
-          timestamp: new Date(),
         },
       ]);
     } catch (error) {
@@ -321,10 +373,8 @@ export default function ChatScreen() {
     try {
       console.log("Clearing chat...");
 
-      // 1. Clear storage FIRST
-      await AsyncStorage.removeItem("chatHistory");
+      await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
 
-      // 2. Then clear state
       setMessages([]);
       setChatHistory([]);
 
@@ -386,7 +436,11 @@ export default function ChatScreen() {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom =
       contentSize.height - contentOffset.y - layoutMeasurement.height;
-    setShowScrollBtn(distanceFromBottom > 100);
+    const shouldShow = distanceFromBottom > 100;
+    if (shouldShow !== showScrollBtnRef.current) {
+      showScrollBtnRef.current = shouldShow;
+      setShowScrollBtn(shouldShow);
+    }
   };
 
   /* ------------------ Render ------------------ */
@@ -409,7 +463,7 @@ export default function ChatScreen() {
         </View>
 
         {/* Messages */}
-        <View style={{ flex: 1 }}>
+        <View style={styles.messagesOuterContainer}>
           <ScrollView
             ref={scrollViewRef}
             style={styles.messagesContainer}
@@ -421,35 +475,8 @@ export default function ChatScreen() {
             onScroll={handleScroll}
             scrollEventThrottle={16}
           >
-            {messages.map((m) => (
-              <View
-                key={m.id}
-                style={[
-                  styles.messageWrapper,
-                  m.sender === "user"
-                    ? styles.messageWrapperUser
-                    : styles.messageWrapperBot,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.messageBubble,
-                    m.sender === "user"
-                      ? styles.messageBubbleUser
-                      : styles.messageBubbleBot,
-                  ]}
-                >
-                  {m.sender === "user" ? (
-                    <Text selectable style={styles.messageTextUser}>
-                      {m.text}
-                    </Text>
-                  ) : (
-                    <Text selectable style={styles.messageTextBot}>
-                      {m.text}
-                    </Text>
-                  )}
-                </View>
-              </View>
+            {messages.map((message) => (
+              <ChatMessageItem key={message.id} message={message} />
             ))}
           </ScrollView>
 
@@ -485,7 +512,7 @@ export default function ChatScreen() {
                 style={[
                   styles.micButton,
                   isListening && styles.micButtonActive,
-                  { transform: [{ scale: isListening ? 1.1 : 1 }] },
+                  isListening && styles.micButtonListening,
                 ]}
               >
                 <Mic size={20} color={isListening ? "#fff" : "#334155"} />
@@ -561,6 +588,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f8fafc",
   },
+  messagesOuterContainer: {
+    flex: 1,
+  },
   messagesContent: {
     paddingHorizontal: 16,
   },
@@ -592,15 +622,17 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: "#3b82f6",
   },
-  messageTextUser: {
+  messageTextSelectable: {
     fontSize: 14,
-    color: "#0f172a",
     lineHeight: 20,
+    padding: 0,
+    margin: 0,
   },
-  messageTextBot: {
-    fontSize: 14,
+  messageTextSelectableUser: {
+    color: "#0f172a",
+  },
+  messageTextSelectableBot: {
     color: "#1e293b",
-    lineHeight: 20,
   },
   scrollToBottomBtn: {
     position: "absolute",
@@ -621,12 +653,9 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   composerContainer: {
-    // backgroundColor: "#f8fafc",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 12,
-    // borderTopWidth: 1,
-    // borderTopColor: "#e2e8f0",
   },
   composerWrapper: {
     flexDirection: "row",
@@ -664,9 +693,12 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     backgroundColor: "#e2e8f0",
   },
+  micButtonListening: {
+    transform: [{ scale: 1.1 }],
+  },
 
   micButtonActive: {
-    backgroundColor: "#ef4444", // 🔴 red when listening
+    backgroundColor: "#ef4444",
   },
 
   send: {
