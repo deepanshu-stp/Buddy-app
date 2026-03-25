@@ -130,6 +130,7 @@ export default function ChatScreen() {
   const voiceRef = useRef<VoiceModule | null>(null);
   const hasLoggedVoiceUnavailableRef = useRef(false);
   const showScrollBtnRef = useRef(false);
+  const ignoreSpeechUpdatesRef = useRef(false);
 
   const getVoice = (): VoiceModule | null => {
     if (voiceRef.current) return voiceRef.current;
@@ -216,12 +217,14 @@ export default function ChatScreen() {
     if (!voice) return;
 
     voice.onSpeechPartialResults = (event: { value?: string[] }) => {
+      if (ignoreSpeechUpdatesRef.current) return;
       const transcript = event.value?.[0]?.trim();
       if (!transcript) return;
       setInputValue(`${speechBaseTextRef.current}${transcript}`.trim());
     };
 
     voice.onSpeechResults = (event: { value?: string[] }) => {
+      if (ignoreSpeechUpdatesRef.current) return;
       const transcript = event.value?.[0]?.trim();
       if (!transcript) return;
       setInputValue(`${speechBaseTextRef.current}${transcript}`.trim());
@@ -268,10 +271,12 @@ export default function ChatScreen() {
       if (!voice) {
         setIsListening(false);
         speechBaseTextRef.current = "";
+        ignoreSpeechUpdatesRef.current = false;
         return;
       }
 
       try {
+        ignoreSpeechUpdatesRef.current = true;
         await voice.stop();
       } catch (error) {
         console.error("Failed to stop voice recognition before send:", error);
@@ -408,6 +413,7 @@ export default function ChatScreen() {
     }
 
     try {
+      ignoreSpeechUpdatesRef.current = false;
       speechBaseTextRef.current = inputValue.trim()
         ? `${inputValue.trim()} `
         : "";
