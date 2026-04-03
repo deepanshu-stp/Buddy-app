@@ -1,9 +1,18 @@
 import Constants from "expo-constants";
 
 const RAW_API_URL =
-  Constants.expoConfig?.extra?.apiUrl || "https://xv2pbkqkl5.execute-api.us-east-2.amazonaws.com/dev/chat";
+  process.env.EXPO_PUBLIC_API_URL ||
+  Constants.expoConfig?.extra?.apiUrl ||
+  "https://xv2pbkqkl5.execute-api.us-east-2.amazonaws.com/dev/chat";
 
 export const API_URL = RAW_API_URL.replace(/\/$/, "");
+
+const RAW_LOGIN_URL =
+  process.env.EXPO_PUBLIC_LOGIN_URL ||
+  Constants.expoConfig?.extra?.loginUrl ||
+  "";
+
+export const LOGIN_URL = RAW_LOGIN_URL.replace(/\/$/, "");
 
 export async function fetchWithTimeout(
   input: RequestInfo | URL,

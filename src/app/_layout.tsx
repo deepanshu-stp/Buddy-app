@@ -20,6 +20,19 @@ export default function RootLayout() {
           title: 'Home',
         }}
       />
+      <Stack.Screen
+        name="LoginScreen"
+        options={{
+          title: 'Login',
+        }}
+      />
+
+      <Stack.Screen
+        name="ChatScreen"
+        options={{
+          title: 'Chat',
+        }}
+      />
     </Stack>
   );
 }
