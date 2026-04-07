@@ -1,7 +1,6 @@
 import { AUTH_STORAGE_KEY } from "@/constants/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Linking from "expo-linking";
-import * as WebBrowser from "expo-web-browser";
+import * as AuthSession from "expo-auth-session";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -12,89 +11,120 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { LOGIN_URL } from "../../api";
-
-WebBrowser.maybeCompleteAuthSession();
+import {
+  LOGIN_URL,
+  MICROSOFT_CLIENT_ID,
+  MICROSOFT_SCOPES,
+  MICROSOFT_TENANT_ID,
+  fetchWithTimeout,
+} from "../../api";
 
 type LoginScreenProps = {
   onLoginSuccess: () => void;
 };
 
-const extractTokenFromUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-
-    const queryToken = parsed.searchParams.get("token");
-    const queryAccessToken =
-      parsed.searchParams.get("access_token");
-
-    if (queryToken || queryAccessToken) {
-      return queryToken ?? queryAccessToken ?? undefined;
-    }
-
-    const hash = parsed.hash?.replace(/^#/, "");
-    if (!hash) return undefined;
-
-    const hashParams = new URLSearchParams(hash);
-
-    return (
-      hashParams.get("token") ??
-      hashParams.get("access_token") ??
-      undefined
-    );
-  } catch {
-    return undefined;
-  }
-};
-
 const LoginScreen = ({ onLoginSuccess }: LoginScreenProps) => {
   const [isLoading, setIsLoading] = useState(false);
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: "buddyapp",
+    path: "auth",
+  });
+  const discovery = AuthSession.useAutoDiscovery(
+    `https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/v2.0`,
+  );
+  const [request, , promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: MICROSOFT_CLIENT_ID,
+      redirectUri,
+      responseType: AuthSession.ResponseType.Code,
+      scopes: MICROSOFT_SCOPES,
+      usePKCE: true,
+    },
+    discovery,
+  );
+
+  const exchangeCodeForToken = async (code: string) => {
+    if (!LOGIN_URL) {
+      throw new Error("Missing login URL.");
+    }
+
+    const response = await fetchWithTimeout(LOGIN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        code,
+        redirectUri,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Login exchange failed: ${response.status} ${body}`);
+    }
+
+    const json = (await response.json()) as {
+      token?: string;
+      access_token?: string;
+      [key: string]: unknown;
+    };
+
+    return {
+      token: json.token ?? json.access_token ?? null,
+      raw: json,
+    };
+  };
 
   const handleMicrosoftLogin = async () => {
-    if (!LOGIN_URL) {
+    if (!MICROSOFT_CLIENT_ID || !MICROSOFT_TENANT_ID) {
       Alert.alert(
         "Login Unavailable",
-        "Login URL is missing. Check your .env file.",
+        "Microsoft auth settings are missing. Check your .env file.",
       );
+      return;
+    }
+
+    if (!request || !discovery) {
+      Alert.alert("Login Unavailable", "Auth session is not ready yet.");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const redirectUri = Linking.createURL("auth");
+      const result = await promptAsync({
+        showInRecents: true,
+      });
 
-      const result =
-        await WebBrowser.openAuthSessionAsync(
-          LOGIN_URL,
-          redirectUri,
-        );
-
-      if (result.type !== "success" || !result.url) {
+      if (result.type !== "success") {
         return;
       }
 
-      const token = extractTokenFromUrl(result.url);
+      const code =
+        "params" in result && typeof result.params?.code === "string"
+          ? result.params.code
+          : null;
+
+      if (!code) {
+        throw new Error("No auth code returned from Microsoft.");
+      }
+
+      const { token, raw } = await exchangeCodeForToken(code);
 
       const payload = {
-        url: result.url,
-        token: token ?? null,
+        token,
+        raw,
         receivedAt: new Date().toISOString(),
       };
 
-      await AsyncStorage.setItem(
-        AUTH_STORAGE_KEY,
-        JSON.stringify(payload),
-      );
+      await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
 
       onLoginSuccess();
     } catch (error) {
       console.error("Microsoft login failed:", error);
 
-      Alert.alert(
-        "Login Failed",
-        "Unable to complete Microsoft login.",
-      );
+      Alert.alert("Login Failed", "Unable to complete Microsoft login.");
     } finally {
       setIsLoading(false);
     }
@@ -103,7 +133,6 @@ const LoginScreen = ({ onLoginSuccess }: LoginScreenProps) => {
   return (
     <View style={styles.container}>
       <View style={styles.card}>
-
         {/* OPX Ai Branding */}
         <View style={styles.brandContainer}>
           <Image
@@ -117,21 +146,14 @@ const LoginScreen = ({ onLoginSuccess }: LoginScreenProps) => {
         </View>
 
         {/* Welcome Text */}
-        <Text style={styles.title}>
-          Welcome to Buddy
-        </Text>
+        <Text style={styles.title}>Welcome to Buddy</Text>
 
-        <Text style={styles.subtitle}>
-          Sign in with Microsoft to continue
-        </Text>
+        <Text style={styles.subtitle}>Sign in with Microsoft to continue</Text>
 
         {/* Microsoft Login Button */}
         <TouchableOpacity
           onPress={handleMicrosoftLogin}
-          style={[
-            styles.button,
-            isLoading && styles.buttonDisabled,
-          ]}
+          style={[styles.button, isLoading && styles.buttonDisabled]}
           activeOpacity={0.85}
           disabled={isLoading}
         >
@@ -139,21 +161,16 @@ const LoginScreen = ({ onLoginSuccess }: LoginScreenProps) => {
             <ActivityIndicator color="#0f172a" />
           ) : (
             <View style={styles.buttonContent}>
-
               {/* Microsoft Logo */}
               <Image
                 source={require("@/assets/microsoft.png")}
                 style={styles.microsoftIcon}
               />
 
-              <Text style={styles.buttonText}>
-                Continue with Microsoft
-              </Text>
-
+              <Text style={styles.buttonText}>Continue with Microsoft</Text>
             </View>
           )}
         </TouchableOpacity>
-
       </View>
     </View>
   );
@@ -193,14 +210,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    
   },
 
   brandLogo: {
     width: 50,
     height: 50,
     resizeMode: "contain",
-    
 
     shadowColor: "#000",
     shadowOpacity: 0.1,
@@ -227,7 +242,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#0f172a",
     textAlign: "center",
-    
   },
 
   subtitle: {
@@ -245,7 +259,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
     width: "75%",
-    margin: "auto",  
+    margin: "auto",
   },
 
   buttonDisabled: {

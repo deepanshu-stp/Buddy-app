@@ -14,6 +14,29 @@ const RAW_LOGIN_URL =
 
 export const LOGIN_URL = RAW_LOGIN_URL.replace(/\/$/, "");
 
+const RAW_MICROSOFT_CLIENT_ID =
+  process.env.EXPO_PUBLIC_MS_CLIENT_ID ||
+  Constants.expoConfig?.extra?.microsoftClientId ||
+  "";
+
+export const MICROSOFT_CLIENT_ID = RAW_MICROSOFT_CLIENT_ID.trim();
+
+const RAW_MICROSOFT_TENANT_ID =
+  process.env.EXPO_PUBLIC_MS_TENANT_ID ||
+  Constants.expoConfig?.extra?.microsoftTenantId ||
+  "common";
+
+export const MICROSOFT_TENANT_ID = RAW_MICROSOFT_TENANT_ID.trim();
+
+const RAW_MICROSOFT_SCOPES =
+  process.env.EXPO_PUBLIC_MS_SCOPES ||
+  Constants.expoConfig?.extra?.microsoftScopes ||
+  "openid profile email offline_access";
+
+export const MICROSOFT_SCOPES = RAW_MICROSOFT_SCOPES.split(",")
+  .map((scope) => scope.trim())
+  .filter(Boolean);
+
 export async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},

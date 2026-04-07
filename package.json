@@ -18,8 +18,10 @@
     "@react-navigation/elements": "^2.8.1",
     "@react-navigation/native": "^7.1.28",
     "expo": "~55.0.3",
+    "expo-auth-session": "~6.2.0",
     "expo-clipboard": "~55.0.9",
     "expo-constants": "~55.0.7",
+    "expo-crypto": "~55.0.12",
     "expo-dev-client": "~55.0.9",
     "expo-device": "~55.0.9",
     "expo-font": "~55.0.4",
@@ -48,6 +50,7 @@
   "devDependencies": {
     "@types/punycode": "^2.1.4",
     "@types/react": "~19.2.2",
+    "expo-module-scripts": "^55.0.2",
     "typescript": "~5.9.2"
   },
   "private": true
