@@ -5,7 +5,8 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
-    "scheme": "buddyapp",
+    // "scheme": "buddyapp",
+    "scheme": "msauth.com.opxai.buddy.app",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/logo.png",
@@ -24,9 +25,7 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/logo.png"
       },
-      "permissions": [
-        "RECORD_AUDIO"
-      ],
+      "permissions": ["RECORD_AUDIO"],
       "predictiveBackGestureEnabled": false,
       "package": "com.opxai.buddy.app"
     },
